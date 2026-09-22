@@ -1,31 +1,41 @@
 name: Generate ISO
+
 on:
   schedule:
-    - cron:
-        "00 10 * * 1" # build at 10:00 UTC every Monday
+    - cron: "0 10 * * 1" # build at 10:00 UTC every Monday
   workflow_dispatch:
 
 jobs:
   iso:
     name: Create and Upload ISO
     runs-on: ubuntu-latest
+
     strategy:
-      fail-fast: false # stop GH from cancelling all matrix builds if one fails
+      fail-fast: false
       matrix:
         image:
           - vauxite
           - vauxite-base
           - vauxite-minimal
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set date
+        shell: bash
+        run: |
+          echo "DATE=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
+
       - name: Build ISO
         shell: bash
         run: |
-          IMAGE="ghcr.io/winblues/vauxite:latest"
+          IMAGE="ghcr.io/winblues/${{ matrix.image }}:latest"
+
           mkdir -p "$GITHUB_WORKSPACE/output"
+
           sudo podman pull "$IMAGE"
+
           sudo podman run \
             --rm \
             --privileged \
@@ -44,22 +54,23 @@ jobs:
       - name: Rename ISO and Generate Checksum
         shell: bash
         run: |
-          mkdir -p output/final
-          find output -name '*.iso' -exec mv {} output/final/${{ matrix.image }}-latest.iso \;
-          cd output/final && sha256sum ${{ matrix.image }}-latest.iso > ${{ matrix.image }}-latest.iso-CHECKSUM
+          set -euxo pipefail
 
-      - name: Upload ISOs and Checksum to R2
-        if: github.ref_name == 'main'
-        shell: bash
-        env:
-          RCLONE_CONFIG_R2_TYPE: s3
-          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
-          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          RCLONE_CONFIG_R2_REGION: auto
-          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y rclone
-          rclone copyto output/final/${{ matrix.image }}-latest.iso R2:ublue-ledif
-          rclone copyto output/final/${{ matrix.image }}-latest.iso-CHECKSUM R2:ublue-ledif
+          mkdir -p output/final
+
+          mv output/bootiso/install.iso \
+            "output/final/${{ matrix.image }}-${DATE}.iso"
+
+          cd output/final
+
+          sha256sum "${{ matrix.image }}-${DATE}.iso" \
+            > "${{ matrix.image }}-${DATE}.iso-CHECKSUM"
+
+      - name: Upload ISO as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.image }}-${{ env.DATE }}
+          path: |
+            output/final/${{ matrix.image }}-${{ env.DATE }}.iso
+            output/final/${{ matrix.image }}-${{ env.DATE }}.iso-CHECKSUM
+
