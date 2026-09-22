@@ -1,4 +1,4 @@
-name: generate-iso
+name: Generate ISO
 on:
   schedule:
     - cron:
@@ -21,21 +21,24 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build ISO
-        id: iso
         shell: bash
         run: |
-          IMAGE="ghcr.io/winblues/${{ matrix.image }}:latest"
+          IMAGE="ghcr.io/winblues/vauxite:latest"
+          mkdir -p "$GITHUB_WORKSPACE/output"
+          sudo podman pull "$IMAGE"
           sudo podman run \
             --rm \
             --privileged \
             --pull=newer \
             --security-opt label=type:unconfined_t \
             -v /var/lib/containers/storage:/var/lib/containers/storage \
-            -v ${{ github.workspace }}/iso/iso.toml:/config.toml:ro \
-            -v ${{ github.workspace }}/output:/output \
+            -v "$GITHUB_WORKSPACE/iso/iso.toml:/config.toml:ro" \
+            -v "$GITHUB_WORKSPACE/output:/output" \
             quay.io/centos-bootc/bootc-image-builder:latest \
             --type anaconda-iso \
             --rootfs btrfs \
+            --local \
+            --chown "$(id -u):$(id -g)" \
             "$IMAGE"
 
       - name: Rename ISO and Generate Checksum
